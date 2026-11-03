@@ -4,8 +4,6 @@ A Paseo plugin to list and attach to existing tmux sessions from any Paseo
 client (desktop, web, mobile) — without starting new agent processes and without
 killing the session when the client closes.
 
-Status: **Phase 1 (P0 minimum viable) — implemented, local-host verified.**
-
 ## What it does
 
 - Adds a **Tmux** item to the sidebar that opens a screen listing the daemon
@@ -53,25 +51,8 @@ paseo plugin logs paseo-tmux-manager
 paseo plugin reload paseo-tmux-manager
 ```
 
-## Verified so far
-
-- Typecheck clean.
-- Plugin loads (`Plugin ready`) with no errors.
-- tmux list format parses to the RPC shape against real sessions.
-- Binding resolver correct on real workspace/project data, including the
-  `checkout` vs `checkout-sdk-native` prefix trap.
-- End-to-end attach mechanism (create terminal → `tmux attach` → kill terminal →
-  session survives detached → reattach) proven via the Paseo CLI/SDK.
-
-## Not yet verified (needs the app / mobile)
-
-- In-app UI round-trip of `tmux.list` / `tmux.attach`.
-- Interactive TUI quality of a Kiro/Codex session inside the Paseo terminal
-  (keys beyond the documented token set).
-- Phone lock-screen / background / network-drop behavior.
-
 ## Roadmap
 
 - P1: create/kill/switch sessions (with confirm), windows/panes, search, filter.
 - P2: associate Kiro/Codex hook events with sessions.
-- Multi-host (company Mac + home Mac mini) via `client.hosts`.
+- Multi-host support via `client.hosts`.
