@@ -87,18 +87,11 @@ index.server.ts / index.client.tsx   registration entry points
 ```bash
 npm install
 npm run typecheck
-paseo plugin install /absolute/path/to/paseo-tmux-manager   # requires pluginsEnabled
+paseo plugin install https://github.com/TivonJJ/paseo-plugin-tmux-manager   # requires pluginsEnabled
 paseo plugin logs paseo-tmux-manager
 # after edits:
 paseo plugin reload paseo-tmux-manager
 ```
-
-## Roadmap
-
-- P1: create/switch sessions, windows/panes, search, filter.
-- P2: associate Kiro/Codex hook events with sessions.
-- A single screen aggregating sessions from multiple hosts needs a cross-host
-  plugin RPC API in the Paseo client SDK.
 
 ## Showcase
 
