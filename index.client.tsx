@@ -3,11 +3,11 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 
 import { TmuxScreen } from "./client/tmux-screen";
 
-function TmuxItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
+function TmuxItem({ host, currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
     <SidebarRow
       icon="SquareTerminal"
-      label="Tmux"
+      label={`Tmux · ${host.label}`}
       active={currentScreen?.screenId === "tmux"}
       onPress={() => openScreen({ screenId: "tmux" })}
     />

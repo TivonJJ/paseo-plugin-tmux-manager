@@ -10,6 +10,7 @@ import { z } from "zod";
 export const bindingKindSchema = z.enum(["exact", "project", "fallback"]);
 
 export const tmuxSessionSchema = z.object({
+  id: z.string(),
   name: z.string(),
   windows: z.number(),
   attached: z.boolean(),
@@ -66,4 +67,11 @@ export const attachSessionRpc = defineRpc({
     terminalId: z.string(),
     workspaceId: z.string(),
   }),
+});
+
+/** Permanently end one existing tmux session and its processes. */
+export const killSessionRpc = defineRpc({
+  name: "tmux.kill",
+  input: z.object({ id: z.string(), name: z.string() }),
+  output: z.object({ killed: z.boolean() }),
 });

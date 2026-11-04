@@ -10,12 +10,20 @@ killing the session when the client closes.
   host's tmux sessions (name, windows, attached state, age, active command,
   working directory).
 - Each session shows its resolved **workspace binding**.
+- The screen shows its Paseo host. To use two computers, install and enable the
+  plugin on each computer; each host's Tmux screen lists that computer's tmux
+  sessions. Session names may repeat across hosts without conflict.
 - Tapping a session row opens a Paseo terminal on a temporary grouped tmux
   session. It shares the original session's windows but has separate mouse and
   key-table options, so local tmux controls are unchanged.
 - Auto-refreshes the list every 5s by default. The switch on the list screen
   turns this on or off and saves the choice. Manual refresh remains available.
   Background refresh does not trigger the pull-to-refresh animation.
+- The **Close** action in a session's bottom row asks for confirmation, then
+  runs `tmux kill-session` for that exact session. It also closes any temporary
+  Paseo grouped sessions attached to it. Processes in windows shared with a
+  separate, non-Paseo tmux session can remain running; the action cannot be
+  undone.
 
 Closing the Paseo terminal removes only the temporary grouped session. The
 original session and its processes survive.
@@ -87,6 +95,7 @@ paseo plugin reload paseo-tmux-manager
 
 ## Roadmap
 
-- P1: create/kill/switch sessions (with confirm), windows/panes, search, filter.
+- P1: create/switch sessions, windows/panes, search, filter.
 - P2: associate Kiro/Codex hook events with sessions.
-- Multi-host support via `client.hosts`.
+- A single screen aggregating sessions from multiple hosts needs a cross-host
+  plugin RPC API in the Paseo client SDK.

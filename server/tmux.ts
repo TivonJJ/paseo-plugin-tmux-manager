@@ -10,6 +10,7 @@ import type { TmuxSession } from "../shared/tmux";
 const FIELD_SEP = "\u001f";
 
 const LIST_FORMAT = [
+  "#{session_id}",
   "#{session_name}",
   "#{session_windows}",
   "#{session_attached}",
@@ -111,13 +112,14 @@ export async function listSessions(): Promise<TmuxResult> {
   const attachedSources = new Set<string>();
   for (const line of stdout.split("\n")) {
     if (!line) continue;
-    const [name, windows, attached, created, path, source] = line.split(FIELD_SEP);
+    const [id, name, windows, attached, created, path, source] = line.split(FIELD_SEP);
     if (!name) continue;
     if (source) {
       if (attached === "1") attachedSources.add(source);
       continue;
     }
     sessions.push({
+      id: id ?? "",
       name,
       windows: Number.parseInt(windows ?? "0", 10) || 0,
       attached: attached === "1",
@@ -131,6 +133,27 @@ export async function listSessions(): Promise<TmuxResult> {
   }
   sessions.sort((a, b) => a.name.localeCompare(b.name));
   return { available: true, error: null, sessions };
+}
+
+/** Kill a session by its exact tmux ID after verifying the displayed name. */
+export async function killSession(id: string, name: string): Promise<void> {
+  if (!/^\$\d+$/.test(id) || !isValidSessionName(name)) {
+    throw new Error("Invalid tmux session target");
+  }
+  const current = await listSessions();
+  if (!current.sessions.some((session) => session.id === id && session.name === name)) {
+    throw new Error("tmux session changed or no longer exists");
+  }
+  // Remove plugin-created grouped sessions first. Otherwise their shared
+  // windows would keep running after the original session is killed.
+  const groups = await run(["list-sessions", "-F", `#{session_id}${FIELD_SEP}#{@paseo_tmux_manager_source}`]);
+  for (const line of groups.split("\n")) {
+    const [groupId, source] = line.split(FIELD_SEP);
+    if (source === name && /^\$\d+$/.test(groupId ?? "")) {
+      await run(["kill-session", "-t", groupId]);
+    }
+  }
+  await run(["kill-session", "-t", id]);
 }
 
 /** Copy root bindings and add Paseo-only history navigation keys. */

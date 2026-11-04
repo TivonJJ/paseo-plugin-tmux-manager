@@ -3,12 +3,12 @@ import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
-import { FlatList, Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
+import { FlatList, Icon, Modal, copyText, useToast } from "@getpaseo/plugin/client/ui";
 
 import { tmuxAttachCommand } from "../shared/attach-command";
 import { listSettingsDefinition } from "../shared/list-settings";
-import type { SessionBinding, SessionView } from "../shared/tmux";
-import { attachSessionRpc, listSessionsRpc } from "../shared/tmux";
+import type { SessionBinding, SessionView, TmuxSession } from "../shared/tmux";
+import { attachSessionRpc, killSessionRpc, listSessionsRpc } from "../shared/tmux";
 
 function bindingLabel(b: SessionBinding): string {
   switch (b.kind) {
@@ -32,16 +32,18 @@ function relativeAge(createdAt: number): string {
   return `${Math.floor(secs / 86400)}d`;
 }
 
-export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
+export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProps) {
   const toast = useToast();
   const listSessions = useRpc(listSessionsRpc);
   const attach = useRpc(attachSessionRpc);
+  const kill = useRpc(killSessionRpc);
   const listSettings = useSettings(listSettingsDefinition);
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [killTarget, setKillTarget] = useState<TmuxSession | null>(null);
   const autoRefresh = listSettings.status === "ready" ? listSettings.values.autoRefresh : true;
 
   const query = useQuery({
-    queryKey: ["tmux-manager", "sessions"],
+    queryKey: ["tmux-manager", "sessions", host.id],
     queryFn: () => listSessions({}),
     refetchInterval: autoRefresh ? 5000 : false,
   });
@@ -58,7 +60,16 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
   const attachMutation = useMutation({
     mutationFn: (name: string) => attach({ name }),
     onSuccess: (result) => {
-      navigation?.openWorkspace?.({ workspaceId: result.workspaceId });
+      navigation?.openWorkspace?.({ workspaceId: result.workspaceId, serverId: host.id });
+    },
+  });
+
+  const killMutation = useMutation({
+    mutationFn: (session: TmuxSession) => kill({ id: session.id, name: session.name }),
+    onSuccess: () => {
+      setKillTarget(null);
+      void query.refetch();
+      toast.show("tmux session closed", { variant: "success" });
     },
   });
 
@@ -87,6 +98,7 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
       refresh: { color: theme.colors.accent, fontSize: 14 },
       autoRefreshRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingHorizontal: layout.compact ? 12 : 20, paddingBottom: 8 },
       autoRefreshLabel: { color: theme.colors.foregroundMuted, fontSize: 13 },
+      hostLabel: { color: theme.colors.foregroundMuted, fontSize: 13, paddingHorizontal: layout.compact ? 12 : 20, paddingBottom: 8 },
       card: {
         borderRadius: 10,
         backgroundColor: theme.colors.surface1,
@@ -99,6 +111,10 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
       meta: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 2 },
       binding: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 4 },
       copyButton: { width: 44, height: 44, alignItems: "center" as const, justifyContent: "center" as const },
+      killButton: { height: 44, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, paddingHorizontal: 10 },
+      killLabel: { color: theme.colors.statusDanger, fontSize: 13 },
+      modalText: { color: theme.colors.foreground, fontSize: 15 },
+      modalActions: { flexDirection: "row" as const, justifyContent: "flex-end" as const, gap: 18, marginTop: 18 },
       dot: { fontSize: 12 },
       empty: { color: theme.colors.foregroundMuted, fontSize: 14, marginTop: 24, textAlign: "center" as const },
       error: { color: theme.colors.statusDanger, fontSize: 14, marginTop: 16 },
@@ -130,6 +146,7 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
       ) : null}
 
       {data?.error && data.available ? <Text style={styles.error}>{data.error}</Text> : null}
+      {query.isError ? <Text style={styles.error}>Could not load tmux sessions on {host.label}.</Text> : null}
 
       {attachMutation.isError ? (
         <Text style={styles.error}>
@@ -138,6 +155,9 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
             ? attachMutation.error.message
             : String(attachMutation.error)}
         </Text>
+      ) : null}
+      {killMutation.isError ? (
+        <Text style={styles.error}>Close failed: {killMutation.error instanceof Error ? killMutation.error.message : String(killMutation.error)}</Text>
       ) : null}
     </View>
   );
@@ -189,6 +209,15 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
           >
             <Icon name="Copy" size={18} color={theme.colors.accent} />
           </Pressable>
+          <Pressable
+            style={styles.killButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Close tmux session ${s.name}`}
+            onPress={() => setKillTarget(s)}
+          >
+            <Icon name="Trash2" size={17} color={theme.colors.statusDanger} />
+            <Text style={styles.killLabel}>Close</Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -197,6 +226,7 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
   return (
     <View style={styles.screen}>
       {headerBar}
+      <Text style={styles.hostLabel}>Host: {host.label}</Text>
       <View style={styles.autoRefreshRow}>
         <Text style={styles.autoRefreshLabel}>Auto-refresh every 5s</Text>
         <Switch
@@ -220,6 +250,25 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
         refreshing={manualRefreshing}
         onRefresh={() => void refreshManually()}
       />
+      <Modal title="Close tmux session?" open={killTarget !== null} onOpenChange={(open) => { if (!open) setKillTarget(null); }}>
+        <Modal.Content>
+          <Text style={styles.modalText}>
+            {killTarget ? `Kill tmux session “${killTarget.name}” on ${host.label}? Its Paseo connections will close. Processes may continue only if another tmux session shares its windows.` : ""}
+          </Text>
+          <View style={styles.modalActions}>
+            <Pressable accessibilityRole="button" onPress={() => setKillTarget(null)}>
+              <Text style={styles.refresh}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={killMutation.isPending || !killTarget}
+              onPress={() => { if (killTarget) killMutation.mutate(killTarget); }}
+            >
+              <Text style={styles.killLabel}>{killMutation.isPending ? "Closing…" : "Kill session"}</Text>
+            </Pressable>
+          </View>
+        </Modal.Content>
+      </Modal>
     </View>
   );
 }
