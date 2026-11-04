@@ -1,10 +1,12 @@
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { FlatList } from "@getpaseo/plugin/client/ui";
+import { useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
+import { FlatList, Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 
+import { tmuxAttachCommand } from "../shared/attach-command";
+import { listSettingsDefinition } from "../shared/list-settings";
 import type { SessionBinding, SessionView } from "../shared/tmux";
 import { attachSessionRpc, listSessionsRpc } from "../shared/tmux";
 
@@ -31,14 +33,27 @@ function relativeAge(createdAt: number): string {
 }
 
 export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
+  const toast = useToast();
   const listSessions = useRpc(listSessionsRpc);
   const attach = useRpc(attachSessionRpc);
+  const listSettings = useSettings(listSettingsDefinition);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const autoRefresh = listSettings.status === "ready" ? listSettings.values.autoRefresh : true;
 
   const query = useQuery({
     queryKey: ["tmux-manager", "sessions"],
     queryFn: () => listSessions({}),
-    refetchInterval: 5000,
+    refetchInterval: autoRefresh ? 5000 : false,
   });
+
+  async function refreshManually() {
+    setManualRefreshing(true);
+    try {
+      await query.refetch();
+    } finally {
+      setManualRefreshing(false);
+    }
+  }
 
   const attachMutation = useMutation({
     mutationFn: (name: string) => attach({ name }),
@@ -70,20 +85,23 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
       },
       title: { color: theme.colors.foreground, fontSize: layout.compact ? 18 : 22, fontWeight: "600" as const },
       refresh: { color: theme.colors.accent, fontSize: 14 },
+      autoRefreshRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingHorizontal: layout.compact ? 12 : 20, paddingBottom: 8 },
+      autoRefreshLabel: { color: theme.colors.foregroundMuted, fontSize: 13 },
       card: {
-        padding: 14,
         borderRadius: 10,
         backgroundColor: theme.colors.surface1,
         marginBottom: 10,
       },
+      cardBody: { flex: 1, padding: 14 },
+      actions: { flexDirection: "row" as const, alignItems: "center" as const, borderTopWidth: 1, borderTopColor: theme.colors.surface0, paddingHorizontal: 8, paddingVertical: 2 },
       row: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
       name: { color: theme.colors.foreground, fontSize: 16, fontWeight: "600" as const },
       meta: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 2 },
       binding: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 4 },
+      copyButton: { width: 44, height: 44, alignItems: "center" as const, justifyContent: "center" as const },
       dot: { fontSize: 12 },
       empty: { color: theme.colors.foregroundMuted, fontSize: 14, marginTop: 24, textAlign: "center" as const },
       error: { color: theme.colors.statusDanger, fontSize: 14, marginTop: 16 },
-      attachBtn: { color: theme.colors.accent, fontSize: 14, fontWeight: "600" as const },
     }),
     [theme, layout.compact],
   );
@@ -96,9 +114,9 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Refresh tmux sessions"
-        onPress={() => void query.refetch()}
+        onPress={() => void refreshManually()}
       >
-        <Text style={styles.refresh}>{query.isFetching ? "…" : "Refresh"}</Text>
+        <Text style={styles.refresh}>{manualRefreshing ? "…" : "Refresh"}</Text>
       </Pressable>
     </View>
   );
@@ -133,38 +151,65 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
     const s = view.session;
     const busy = attachMutation.isPending && attachMutation.variables === s.name;
     return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Attach to tmux session ${s.name}`}
-        disabled={attachMutation.isPending}
-        onPress={() => attachMutation.mutate(s.name)}
-        style={styles.card}
-      >
-        <View style={styles.row}>
-          <Text style={styles.name}>{s.name}</Text>
-          <Text
-            style={[styles.dot, { color: s.attached ? theme.colors.accent : theme.colors.foregroundMuted }]}
+      <View style={styles.card}>
+        <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Attach to tmux session ${s.name}`}
+            disabled={attachMutation.isPending}
+            onPress={() => attachMutation.mutate(s.name)}
+            style={styles.cardBody}
+        >
+            <View style={styles.row}>
+              <Text style={styles.name}>{s.name}</Text>
+              <Text style={[styles.dot, { color: s.attached ? theme.colors.accent : theme.colors.foregroundMuted }]}>
+                {busy ? "Attaching…" : s.attached ? "● attached" : "○ detached"}
+              </Text>
+            </View>
+            <Text style={styles.meta}>
+              {s.windows} window{s.windows === 1 ? "" : "s"}
+              {s.command ? ` · ${s.command}` : ""}
+              {s.createdAt ? ` · ${relativeAge(s.createdAt)} ago` : ""}
+            </Text>
+            <Text style={styles.meta}>{s.path || "(no path)"}</Text>
+            <Text style={styles.binding}>{bindingLabel(view.binding)}</Text>
+        </Pressable>
+        <View style={styles.actions}>
+          <Pressable
+            style={styles.copyButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Copy tmux attach command for ${s.name}`}
+            onPress={async () => {
+              try {
+                await copyText(tmuxAttachCommand(s.name));
+                toast.show("Command copied", { variant: "success" });
+              } catch {
+                toast.error("Could not copy command");
+              }
+            }}
           >
-            {s.attached ? "● attached" : "○ detached"}
-          </Text>
+            <Icon name="Copy" size={18} color={theme.colors.accent} />
+          </Pressable>
         </View>
-        <Text style={styles.meta}>
-          {s.windows} window{s.windows === 1 ? "" : "s"}
-          {s.command ? ` · ${s.command}` : ""}
-          {s.createdAt ? ` · ${relativeAge(s.createdAt)} ago` : ""}
-        </Text>
-        <Text style={styles.meta}>{s.path || "(no path)"}</Text>
-        <View style={styles.row}>
-          <Text style={styles.binding}>{bindingLabel(view.binding)}</Text>
-          <Text style={styles.attachBtn}>{busy ? "Attaching…" : "Attach"}</Text>
-        </View>
-      </Pressable>
+      </View>
     );
   };
 
   return (
     <View style={styles.screen}>
       {headerBar}
+      <View style={styles.autoRefreshRow}>
+        <Text style={styles.autoRefreshLabel}>Auto-refresh every 5s</Text>
+        <Switch
+          accessibilityLabel="Auto-refresh tmux sessions"
+          value={autoRefresh}
+          disabled={listSettings.status !== "ready" || listSettings.saving}
+          onValueChange={(next) => {
+            if (listSettings.status === "ready") {
+              void listSettings.save({ autoRefresh: next }, listSettings.revision);
+            }
+          }}
+        />
+      </View>
       <FlatList
         contentContainerStyle={styles.listContent}
         data={data?.sessions ?? []}
@@ -172,8 +217,8 @@ export function TmuxScreen({ theme, layout, navigation }: PluginScreenProps) {
         renderItem={renderItem}
         ListHeaderComponent={notices}
         ListEmptyComponent={empty}
-        refreshing={query.isFetching}
-        onRefresh={() => void query.refetch()}
+        refreshing={manualRefreshing}
+        onRefresh={() => void refreshManually()}
       />
     </View>
   );

@@ -10,12 +10,46 @@ killing the session when the client closes.
   host's tmux sessions (name, windows, attached state, age, active command,
   working directory).
 - Each session shows its resolved **workspace binding**.
-- Tapping a session attaches a Paseo terminal to it via
-  `tmux attach-session -t <name>` and navigates to the owning workspace.
-- Auto-refreshes the list every 5s; manual refresh button too.
+- Tapping a session row opens a Paseo terminal on a temporary grouped tmux
+  session. It shares the original session's windows but has separate mouse and
+  key-table options, so local tmux controls are unchanged.
+- Auto-refreshes the list every 5s by default. The switch on the list screen
+  turns this on or off and saves the choice. Manual refresh remains available.
+  Background refresh does not trigger the pull-to-refresh animation.
 
-It never runs `new-session` or `kill-session`. Closing the Paseo terminal is a
-detach; the tmux session and its processes survive.
+Closing the Paseo terminal removes only the temporary grouped session. The
+original session and its processes survive.
+
+## Scrolling a tmux terminal
+
+Paseo's native phone terminal handles touch scrolling in its own terminal view.
+That touch gesture does not send tmux a mouse wheel event, so dragging the phone
+screen cannot reliably move through tmux's history. A plain shell can scroll
+because its output stays in the terminal's local history; tmux keeps its own
+history in copy mode. A native touch fix requires a Paseo app update.
+
+The plugin provides keyboard navigation inside the **attached terminal**:
+
+| Keys | Action |
+| --- | --- |
+| **Ctrl+↑** | Enter tmux copy mode and move up one page; then page up again. |
+| **Ctrl+↓** | Page down while in copy mode. |
+| **Ctrl+Shift+↑** | Enter copy mode if needed and jump to the oldest history. |
+| **Ctrl+Shift+↓** | Jump to the bottom of history. |
+| **q** | Leave copy mode and return to live output. |
+
+On the phone, use the terminal's Ctrl and Shift modifier buttons with its arrow
+buttons. On macOS, the physical-keyboard Ctrl+↑/↓ shortcuts may be intercepted
+by Mission Control. The web terminal's mouse wheel uses tmux mouse mode on the
+temporary grouped session. The original tmux session's mouse and root key-table
+options are not changed. Copy mode belongs to the shared pane, so another
+client viewing the same pane may see it while you scroll.
+
+## External SSH clients
+
+Each session has a copy icon in a separate action row. It copies a shell-quoted
+`tmux attach-session -t 'name'` command to the clipboard of the device running
+Paseo. Connect to the same host in Termius or another SSH client, then paste it.
 
 ## Workspace binding
 

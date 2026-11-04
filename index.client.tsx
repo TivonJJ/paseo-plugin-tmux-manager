@@ -2,7 +2,6 @@ import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plug
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 
 import { TmuxScreen } from "./client/tmux-screen";
-import { SettingsScreen } from "./client/settings-screen";
 
 function TmuxItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
@@ -18,11 +17,5 @@ function TmuxItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
 export default function contribute(client: PluginClientContext) {
   client.addScreen({ id: "tmux", title: "Tmux", Component: TmuxScreen });
   client.addSidebarHeaderItem({ id: "tmux", title: "Tmux", Component: TmuxItem });
-  client.addSettingsScreen({
-    id: "settings",
-    title: "Tmux Manager",
-    icon: "SquareTerminal",
-    Component: SettingsScreen,
-  });
   return () => {};
 }

@@ -1,4 +1,8 @@
 import { execCommand } from "@getpaseo/plugin/server";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { TmuxSession } from "../shared/tmux";
 
@@ -11,7 +15,10 @@ const LIST_FORMAT = [
   "#{session_attached}",
   "#{session_created}",
   "#{session_path}",
+  "#{@paseo_tmux_manager_source}",
 ].join(FIELD_SEP);
+
+const PASEO_KEY_TABLE = "paseo-tmux-manager-root";
 
 export interface TmuxResult {
   available: boolean;
@@ -101,10 +108,15 @@ export async function listSessions(): Promise<TmuxResult> {
 
   const commands = await paneCommands();
   const sessions: TmuxSession[] = [];
+  const attachedSources = new Set<string>();
   for (const line of stdout.split("\n")) {
     if (!line) continue;
-    const [name, windows, attached, created, path] = line.split(FIELD_SEP);
+    const [name, windows, attached, created, path, source] = line.split(FIELD_SEP);
     if (!name) continue;
+    if (source) {
+      if (attached === "1") attachedSources.add(source);
+      continue;
+    }
     sessions.push({
       name,
       windows: Number.parseInt(windows ?? "0", 10) || 0,
@@ -114,21 +126,74 @@ export async function listSessions(): Promise<TmuxResult> {
       command: commands.get(name) ?? null,
     });
   }
+  for (const session of sessions) {
+    if (attachedSources.has(session.name)) session.attached = true;
+  }
   sessions.sort((a, b) => a.name.localeCompare(b.name));
   return { available: true, error: null, sessions };
 }
 
-/**
- * Set the `mouse` option for a single session only (session-scoped override).
- * Does not change the global tmux option or any other session. Best-effort:
- * returns false on failure instead of throwing, so attach never breaks on this.
- */
-export async function setSessionMouse(name: string, on: boolean): Promise<boolean> {
-  if (!isValidSessionName(name)) return false;
+/** Copy root bindings and add Paseo-only history navigation keys. */
+async function prepareKeyTable(): Promise<void> {
+  const rootBindings = await run(["list-keys", "-T", "root"]);
+  const lines = rootBindings
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.replace(/-T root(?=\s)/, `-T ${PASEO_KEY_TABLE}`));
+  if (lines.some((line) => !line.includes(`-T ${PASEO_KEY_TABLE}`))) {
+    throw new TmuxCommandError("Could not copy tmux root key bindings");
+  }
+  const dir = await mkdtemp(join(tmpdir(), "paseo-tmux-keys-"));
   try {
-    await run(["set-option", "-t", name, "mouse", on ? "on" : "off"]);
-    return true;
+    await writeFile(join(dir, "keys.conf"), `${lines.join("\n")}\n`);
+    await run(["source-file", join(dir, "keys.conf")]);
+    await run(["unbind-key", "-T", PASEO_KEY_TABLE, "M-Up"]).catch(() => undefined);
+    await run(["unbind-key", "-T", PASEO_KEY_TABLE, "M-S-Up"]).catch(() => undefined);
+    await run(["bind-key", "-T", PASEO_KEY_TABLE, "C-Up", "copy-mode", "-u"]);
+    await run(["bind-key", "-T", PASEO_KEY_TABLE, "C-S-Up", "copy-mode; send-keys -X history-top"]);
+    // Copy-mode tables are global. The condition keeps these keys inert in
+    // ordinary local sessions, where they were previously unbound.
+    const isPaseoSession = "#{!=:#{@paseo_tmux_manager_source},}";
+    for (const table of ["copy-mode", "copy-mode-vi"]) {
+      for (const key of ["M-S-Up", "M-S-Down"]) {
+        const old = await run(["list-keys", "-T", table, key]).catch(() => "");
+        if (old.includes("@paseo_tmux_manager_source")) await run(["unbind-key", "-T", table, key]);
+      }
+      await run(["bind-key", "-T", table, "C-S-Up", "if-shell", "-F", isPaseoSession, "send-keys -X history-top"]);
+      await run(["bind-key", "-T", table, "C-S-Down", "if-shell", "-F", isPaseoSession, "send-keys -X history-bottom"]);
+      const fallbackUp = table === "copy-mode" ? "send-keys -X scroll-up" : "";
+      const fallbackDown = table === "copy-mode" ? "send-keys -X scroll-down" : "";
+      await run(["bind-key", "-T", table, "C-Up", "if-shell", "-F", isPaseoSession, "send-keys -X page-up", fallbackUp]);
+      await run(["bind-key", "-T", table, "C-Down", "if-shell", "-F", isPaseoSession, "send-keys -X page-down", fallbackDown]);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** A grouped session shares panes but has its own mouse and key-table options. */
+export async function createPaseoSession(source: string): Promise<string> {
+  if (!isValidSessionName(source)) throw new Error("Invalid tmux session name");
+  await prepareKeyTable();
+  const name = `paseo_${randomBytes(8).toString("hex")}`;
+  await run(["new-session", "-d", "-t", `=${source}`, "-s", name]);
+  try {
+    await run(["set-option", "-t", name, "@paseo_tmux_manager_source", source]);
+    await run(["set-option", "-t", name, "key-table", PASEO_KEY_TABLE]);
+    await run(["set-option", "-t", name, "mouse", "on"]);
+    // Setting destroy-unattached before a client attaches kills the session.
+    await run(["set-hook", "-t", name, "client-attached", `set-option -t ${name} destroy-unattached on`]);
+    return name;
+  } catch (error) {
+    await destroyPaseoSession(name);
+    throw error;
+  }
+}
+
+export async function destroyPaseoSession(name: string): Promise<void> {
+  try {
+    await run(["kill-session", "-t", name]);
   } catch {
-    return false;
+    // A detached grouped session may have already been auto-destroyed.
   }
 }

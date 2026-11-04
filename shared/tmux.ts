@@ -20,7 +20,6 @@ export const tmuxSessionSchema = z.object({
   /** command running in the session's active pane, best-effort */
   command: z.string().nullable(),
 });
-
 export type TmuxSession = z.infer<typeof tmuxSessionSchema>;
 
 export const sessionBindingSchema = z.object({
@@ -57,8 +56,8 @@ export const listSessionsRpc = defineRpc({
 /**
  * Attach a Paseo terminal to an existing tmux session. The server resolves (or
  * lazily creates) the target workspace, then opens a terminal that runs
- * `tmux attach-session -t <name>`. Returns the terminal id so the client can
- * open it. Never creates or kills tmux sessions.
+ * `tmux attach-session -t <grouped session>`. The grouped session shares the
+ * source panes but has isolated key and mouse options, and is removed on detach.
  */
 export const attachSessionRpc = defineRpc({
   name: "tmux.attach",

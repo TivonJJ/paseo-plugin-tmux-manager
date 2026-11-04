@@ -5,14 +5,14 @@ import {
   attachSessionRpc,
   listSessionsRpc,
 } from "../shared/tmux";
-import { defaultSettings, settingsDefinition } from "../shared/settings";
+import { listSettingsDefinition } from "../shared/list-settings";
 import {
   OPS_WORKSPACE_TITLE,
   type ProjectLike,
   type WorkspaceLike,
   resolveBinding,
 } from "./binding";
-import { isValidSessionName, listSessions, setSessionMouse } from "./tmux";
+import { createPaseoSession, destroyPaseoSession, isValidSessionName, listSessions } from "./tmux";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -62,18 +62,7 @@ async function loadProjects(paseo: any): Promise<ProjectLike[]> {
 }
 
 export function registerHandlers(server: PluginServerContext): void {
-  const settings = server.registerSettings(settingsDefinition);
-
-  async function readAutoMouse(): Promise<boolean> {
-    try {
-      const state = await settings.read();
-      if (state.status === "ready") return state.values.autoMouse;
-    } catch (error) {
-      console.error("[tmux-manager] failed to read settings", error);
-    }
-    return defaultSettings.autoMouse;
-  }
-
+  server.registerSettings(listSettingsDefinition);
   server.handle(
     listSessionsRpc,
     async (_input: unknown, { paseo }: PluginHandlerContext) => {
@@ -124,21 +113,18 @@ export function registerHandlers(server: PluginServerContext): void {
 
       const workspaceId = await ensureWorkspace(paseo, binding, session.path);
 
-      // Optionally enable mouse for this session only, so the wheel scrolls
-      // tmux scrollback inside the Paseo terminal. Session-scoped; best-effort.
-      if (await readAutoMouse()) {
-        const ok = await setSessionMouse(name, true);
-        if (!ok) console.error(`[tmux-manager] could not set mouse on for ${name}`);
+      const paseoSession = await createPaseoSession(name);
+      try {
+        const terminal = await paseo.workspaces.ref(workspaceId).terminals.create({
+          name: `tmux: ${name}`,
+          command: "tmux",
+          args: ["attach-session", "-t", paseoSession],
+        });
+        return { terminalId: String(terminal.id), workspaceId };
+      } catch (error) {
+        await destroyPaseoSession(paseoSession);
+        throw error;
       }
-
-      // Attach with an explicit argv array: no shell, no injection surface.
-      const terminal = await paseo.workspaces.ref(workspaceId).terminals.create({
-        name: `tmux: ${name}`,
-        command: "tmux",
-        args: ["attach-session", "-t", name],
-      });
-
-      return { terminalId: String(terminal.id), workspaceId };
     },
   );
 }

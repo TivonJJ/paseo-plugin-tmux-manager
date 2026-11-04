@@ -1,6 +1,7 @@
 {
   "name": "paseo-tmux-manager",
   "private": true,
+  "type": "module",
   "version": "0.0.0",
   "files": [
     "paseo-plugin.json",
@@ -15,6 +16,7 @@
     "shared/"
   ],
   "scripts": {
+    "test": "node --test shared/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
