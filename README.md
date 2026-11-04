@@ -99,3 +99,13 @@ paseo plugin reload paseo-tmux-manager
 - P2: associate Kiro/Codex hook events with sessions.
 - A single screen aggregating sessions from multiple hosts needs a cross-host
   plugin RPC API in the Paseo client SDK.
+
+## Showcase
+
+<p align="center">
+  <img src="showcase/sc1.JPG" alt="Tmux session list" width="320" />
+</p>
+
+<p align="center">
+  <img src="showcase/sc2.JPG" alt="Attached tmux terminal" width="320" />
+</p>
