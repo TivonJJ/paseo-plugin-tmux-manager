@@ -194,28 +194,46 @@ async function prepareKeyTable(): Promise<void> {
   }
 }
 
-/** A grouped session shares panes but has its own mouse and key-table options. */
+/**
+ * A grouped session shares panes but has its own mouse and key-table options.
+ * Returns its tmux session ID (`$N`); callers target it by ID only.
+ */
 export async function createPaseoSession(source: string): Promise<string> {
   if (!isValidSessionName(source)) throw new Error("Invalid tmux session name");
   await prepareKeyTable();
-  const name = `paseo_${randomBytes(8).toString("hex")}`;
-  await run(["new-session", "-d", "-t", `=${source}`, "-s", name]);
+  // Readable in the tmux status line (`#S`); the suffix keeps names unique.
+  const name = `${source}~${randomBytes(3).toString("hex")}`;
+  // tmux format-expands `-s`, so `#` must be doubled: an unescaped `#(...)`
+  // in a session name would run a shell command.
+  const nameArg = name.replaceAll("#", "##");
+  const id = (
+    await run(["new-session", "-d", "-P", "-F", "#{session_id}", "-t", `=${source}`, "-s", nameArg])
+  ).trim();
+  if (!/^\$\d+$/.test(id)) {
+    await destroyPaseoSession(`=${name}`);
+    throw new TmuxCommandError(`Unexpected tmux session id: ${JSON.stringify(id)}`);
+  }
   try {
-    await run(["set-option", "-t", name, "@paseo_tmux_manager_source", source]);
-    await run(["set-option", "-t", name, "key-table", PASEO_KEY_TABLE]);
-    await run(["set-option", "-t", name, "mouse", "on"]);
+    await run(["set-option", "-t", id, "@paseo_tmux_manager_source", source]);
+    await run(["set-option", "-t", id, "key-table", PASEO_KEY_TABLE]);
+    await run(["set-option", "-t", id, "mouse", "on"]);
+    // With `set-titles on`, tmux sends this as the terminal title, which Paseo
+    // shows as the tab label. Without it the label is the random session name.
+    await run(["set-option", "-t", id, "set-titles-string", "tmux: #{@paseo_tmux_manager_source}"]);
     // Setting destroy-unattached before a client attaches kills the session.
-    await run(["set-hook", "-t", name, "client-attached", `set-option -t ${name} destroy-unattached on`]);
-    return name;
+    // The hook is parsed as a tmux command, so it embeds only the `$N` ID.
+    await run(["set-hook", "-t", id, "client-attached", `set-option -t ${id} destroy-unattached on`]);
+    return id;
   } catch (error) {
-    await destroyPaseoSession(name);
+    await destroyPaseoSession(id);
     throw error;
   }
 }
 
-export async function destroyPaseoSession(name: string): Promise<void> {
+/** `target` is a session ID (`$N`) or an exact-match name (`=name`). */
+export async function destroyPaseoSession(target: string): Promise<void> {
   try {
-    await run(["kill-session", "-t", name]);
+    await run(["kill-session", "-t", target]);
   } catch {
     // A detached grouped session may have already been auto-destroyed.
   }
