@@ -24,10 +24,12 @@ const FOCUS_DELAYS_MS = [800, 2000];
 /** Navigate the app to one of its own routes. */
 function openAppRoute(route: string): void {
   if (Platform.OS === "web") {
-    // Same mechanism the app's browser e2e tests use to drive expo-router.
+    // The app's browser e2e tests drive expo-router the same way, with
+    // pushState. replaceState overwrites the entry openWorkspace just added,
+    // which has the same path, so each focus attempt does not add a Back step.
     const win = (globalThis as { window?: any }).window;
-    if (!win?.history?.pushState) return;
-    win.history.pushState(null, "", route);
+    if (!win?.history?.replaceState) return;
+    win.history.replaceState(null, "", route);
     win.dispatchEvent(new win.PopStateEvent("popstate"));
     return;
   }
