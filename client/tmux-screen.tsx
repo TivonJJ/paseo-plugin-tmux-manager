@@ -2,13 +2,67 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, Switch, Text, View } from "react-native";
 import { FlatList, Icon, Modal, copyText, useToast } from "@getpaseo/plugin/client/ui";
 
 import { tmuxAttachCommand } from "../shared/attach-command";
 import { listSettingsDefinition } from "../shared/list-settings";
 import type { SessionBinding, SessionView, TmuxSession } from "../shared/tmux";
 import { attachSessionRpc, killSessionRpc, listSessionsRpc } from "../shared/tmux";
+import { workspaceTerminalRoute } from "../shared/workspace-route";
+
+/** The app's URL scheme (`scheme` in its Expo config, shared by every build variant). */
+const APP_SCHEME = "paseo";
+
+/**
+ * Delays after opening the workspace at which the focus route is sent. The
+ * first usually lands after the app refetches the workspace's terminal list;
+ * the second covers a slow connection. Re-focusing the same tab is a no-op.
+ */
+const FOCUS_DELAYS_MS = [800, 2000];
+
+/** Navigate the app to one of its own routes. */
+function openAppRoute(route: string): void {
+  if (Platform.OS === "web") {
+    // The app's browser e2e tests drive expo-router the same way, with
+    // pushState. replaceState overwrites the entry openWorkspace just added,
+    // which has the same path, so each focus attempt does not add a Back step.
+    const win = (globalThis as { window?: any }).window;
+    if (!win?.history?.replaceState) return;
+    win.history.replaceState(null, "", route);
+    win.dispatchEvent(new win.PopStateEvent("popstate"));
+    return;
+  }
+  Linking.openURL(`${APP_SCHEME}:/${route}`).catch(() => undefined);
+}
+
+/** Cancels the focus timers of the previous attach, if still pending. */
+let cancelPendingFocus: (() => void) | null = null;
+
+/**
+ * Open the workspace with the new terminal tab focused.
+ *
+ * The SDK's `openWorkspace` takes no tab target, so the app keeps whichever
+ * tab was focused before. The app's `?open=terminal:<id>` route focuses a tab,
+ * but sending it immediately does not stick: while the plugin screen is shown,
+ * the workspace's terminal list query is disabled, and its cached list lacks
+ * the new terminal. On arrival the app closes the tab as unknown, then re-adds
+ * it unfocused at the end once the list refetches. So open the workspace first
+ * (which re-enables the query), and send the focus route after the refetch.
+ * Timers are not cancelled on unmount: the screen unmounts when it navigates.
+ */
+function openTerminalTab(
+  navigation: PluginScreenProps["navigation"],
+  target: { serverId: string; workspaceId: string; terminalId: string },
+): void {
+  cancelPendingFocus?.();
+  cancelPendingFocus = null;
+  navigation?.openWorkspace?.({ workspaceId: target.workspaceId, serverId: target.serverId });
+  const route = workspaceTerminalRoute(target.serverId, target.workspaceId, target.terminalId);
+  if (!route) return;
+  const timers = FOCUS_DELAYS_MS.map((ms) => setTimeout(() => openAppRoute(route), ms));
+  cancelPendingFocus = () => timers.forEach(clearTimeout);
+}
 
 function bindingLabel(b: SessionBinding): string {
   switch (b.kind) {
@@ -60,7 +114,11 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
   const attachMutation = useMutation({
     mutationFn: (name: string) => attach({ name }),
     onSuccess: (result) => {
-      navigation?.openWorkspace?.({ workspaceId: result.workspaceId, serverId: host.id });
+      openTerminalTab(navigation, {
+        serverId: host.id,
+        workspaceId: result.workspaceId,
+        terminalId: result.terminalId,
+      });
     },
   });
 
