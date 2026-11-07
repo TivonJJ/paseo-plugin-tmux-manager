@@ -5,9 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { TmuxSession } from "../shared/tmux";
-
-/** Unit separator; cannot appear in tmux format field values we request. */
-const FIELD_SEP = "\u001f";
+import { FIELD_SEP } from "../shared/tmux-format";
 
 const LIST_FORMAT = [
   "#{session_id}",
