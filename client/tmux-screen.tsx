@@ -189,7 +189,8 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
       name: { color: theme.colors.foreground, fontSize: 16, fontWeight: "600" as const },
       meta: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 2 },
       binding: { color: theme.colors.foregroundMuted, fontSize: 13, marginTop: 4 },
-      copyButton: { width: 44, height: 44, alignItems: "center" as const, justifyContent: "center" as const },
+      copyButton: { height: 44, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, paddingHorizontal: 10 },
+      copyLabel: { color: theme.colors.accent, fontSize: 13 },
       killButton: { height: 44, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, paddingHorizontal: 10 },
       killLabel: { color: theme.colors.statusDanger, fontSize: 13 },
       modalText: { color: theme.colors.foreground, fontSize: 15 },
@@ -301,6 +302,7 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
             }}
           >
             <Icon name="Copy" size={18} color={theme.colors.accent} />
+            <Text style={styles.copyLabel}>Copy</Text>
           </Pressable>
           <Pressable
             style={styles.killButton}
