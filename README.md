@@ -19,6 +19,11 @@ killing the session when the client closes.
 - Auto-refreshes the list every 5s by default. The switch on the list screen
   turns this on or off and saves the choice. Manual refresh remains available.
   Background refresh does not trigger the pull-to-refresh animation.
+- The **New** button in the header asks for a session name, creates an empty
+  detached tmux session in the daemon's home directory (`tmux new-session`),
+  and attaches to it right away. Names cannot contain spaces, `.` or `:`, and
+  an existing name is rejected rather than overwritten. If the attach fails,
+  the new session is kept.
 - The **Close** action in a session's bottom row asks for confirmation, then
   runs `tmux kill-session` for that exact session. It also closes any temporary
   Paseo grouped sessions attached to it. Processes in windows shared with a

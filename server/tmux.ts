@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { validateNewSessionName } from "../shared/session-name";
 import type { TmuxSession } from "../shared/tmux";
 import { FIELD_SEP } from "../shared/tmux-format";
 
@@ -234,5 +235,24 @@ export async function destroyPaseoSession(target: string): Promise<void> {
     await run(["kill-session", "-t", target]);
   } catch {
     // A detached grouped session may have already been auto-destroyed.
+  }
+}
+
+/**
+ * Create a new empty, detached session rooted at $HOME. Refuses an existing
+ * name: tmux checks for duplicates itself, so there is no check-then-create race.
+ */
+export async function createSession(name: string): Promise<void> {
+  const invalid = validateNewSessionName(name);
+  if (invalid) throw new Error(invalid);
+  // tmux format-expands `-s`, so `#` must be doubled (see createPaseoSession).
+  const nameArg = name.replaceAll("#", "##");
+  try {
+    await run(["new-session", "-d", "-s", nameArg, "-c", process.env.HOME || "/"]);
+  } catch (error) {
+    if (error instanceof TmuxCommandError && /duplicate session/i.test(error.message)) {
+      throw new Error(`tmux session already exists: ${name}`);
+    }
+    throw error;
   }
 }

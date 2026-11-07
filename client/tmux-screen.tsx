@@ -2,13 +2,14 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, Switch, Text, TextInput, View } from "react-native";
 import { FlatList, Icon, Modal, copyText, useToast } from "@getpaseo/plugin/client/ui";
 
 import { tmuxAttachCommand } from "../shared/attach-command";
 import { listSettingsDefinition } from "../shared/list-settings";
+import { validateNewSessionName } from "../shared/session-name";
 import type { SessionBinding, SessionView, TmuxSession } from "../shared/tmux";
-import { attachSessionRpc, killSessionRpc, listSessionsRpc } from "../shared/tmux";
+import { attachSessionRpc, createSessionRpc, killSessionRpc, listSessionsRpc } from "../shared/tmux";
 import { workspaceTerminalRoute } from "../shared/workspace-route";
 
 /** The app's URL scheme (`scheme` in its Expo config, shared by every build variant). */
@@ -91,9 +92,12 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
   const listSessions = useRpc(listSessionsRpc);
   const attach = useRpc(attachSessionRpc);
   const kill = useRpc(killSessionRpc);
+  const create = useRpc(createSessionRpc);
   const listSettings = useSettings(listSettingsDefinition);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [killTarget, setKillTarget] = useState<TmuxSession | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newName, setNewName] = useState("");
   const autoRefresh = listSettings.status === "ready" ? listSettings.values.autoRefresh : true;
 
   const query = useQuery({
@@ -121,6 +125,23 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
       });
     },
   });
+
+  const createMutation = useMutation({
+    mutationFn: async (name: string) => {
+      await create({ name });
+      return name;
+    },
+    onSuccess: (name) => {
+      setNewOpen(false);
+      setNewName("");
+      void query.refetch();
+      // Created sessions are attached right away; a failed attach keeps the session.
+      attachMutation.mutate(name);
+    },
+  });
+
+  const newNameError = newName.length > 0 ? validateNewSessionName(newName) : null;
+  const canCreate = newName.length > 0 && newNameError === null && !createMutation.isPending;
 
   const killMutation = useMutation({
     mutationFn: (session: TmuxSession) => kill({ id: session.id, name: session.name }),
@@ -173,6 +194,8 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
       killLabel: { color: theme.colors.statusDanger, fontSize: 13 },
       modalText: { color: theme.colors.foreground, fontSize: 15 },
       modalActions: { flexDirection: "row" as const, justifyContent: "flex-end" as const, gap: 18, marginTop: 18 },
+      headerActions: { flexDirection: "row" as const, alignItems: "center" as const, gap: 18 },
+      input: { color: theme.colors.foreground, backgroundColor: theme.colors.surface0, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
       dot: { fontSize: 12 },
       empty: { color: theme.colors.foregroundMuted, fontSize: 14, marginTop: 24, textAlign: "center" as const },
       error: { color: theme.colors.statusDanger, fontSize: 14, marginTop: 16 },
@@ -185,13 +208,25 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
   const headerBar = (
     <View style={styles.header}>
       <Text style={styles.title}>tmux sessions</Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Refresh tmux sessions"
-        onPress={() => void refreshManually()}
-      >
-        <Text style={styles.refresh}>{manualRefreshing ? "…" : "Refresh"}</Text>
-      </Pressable>
+      <View style={styles.headerActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="New tmux session"
+          onPress={() => {
+            createMutation.reset();
+            setNewOpen(true);
+          }}
+        >
+          <Text style={styles.refresh}>New</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Refresh tmux sessions"
+          onPress={() => void refreshManually()}
+        >
+          <Text style={styles.refresh}>{manualRefreshing ? "…" : "Refresh"}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -308,6 +343,36 @@ export function TmuxScreen({ theme, host, layout, navigation }: PluginScreenProp
         refreshing={manualRefreshing}
         onRefresh={() => void refreshManually()}
       />
+      <Modal title="New tmux session" open={newOpen} onOpenChange={(open) => { if (!open) setNewOpen(false); }}>
+        <Modal.Content>
+          <TextInput
+            accessibilityLabel="Session name"
+            placeholder="Session name"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            value={newName}
+            onChangeText={setNewName}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            style={styles.input}
+            onSubmitEditing={() => { if (canCreate) createMutation.mutate(newName); }}
+          />
+          {newNameError ? <Text style={styles.error}>{newNameError}</Text> : null}
+          {createMutation.isError ? (
+            <Text style={styles.error}>
+              Create failed: {createMutation.error instanceof Error ? createMutation.error.message : String(createMutation.error)}
+            </Text>
+          ) : null}
+          <View style={styles.modalActions}>
+            <Pressable accessibilityRole="button" onPress={() => setNewOpen(false)}>
+              <Text style={styles.refresh}>Cancel</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={!canCreate} onPress={() => createMutation.mutate(newName)}>
+              <Text style={[styles.refresh, !canCreate && { opacity: 0.4 }]}>{createMutation.isPending ? "Creating…" : "Create"}</Text>
+            </Pressable>
+          </View>
+        </Modal.Content>
+      </Modal>
       <Modal title="Close tmux session?" open={killTarget !== null} onOpenChange={(open) => { if (!open) setKillTarget(null); }}>
         <Modal.Content>
           <Text style={styles.modalText}>

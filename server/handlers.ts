@@ -3,6 +3,7 @@ import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin
 import {
   type SessionView,
   attachSessionRpc,
+  createSessionRpc,
   killSessionRpc,
   listSessionsRpc,
 } from "../shared/tmux";
@@ -13,7 +14,7 @@ import {
   type WorkspaceLike,
   resolveBinding,
 } from "./binding";
-import { createPaseoSession, destroyPaseoSession, isValidSessionName, killSession, listSessions } from "./tmux";
+import { createPaseoSession, createSession, destroyPaseoSession, isValidSessionName, killSession, listSessions } from "./tmux";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -128,6 +129,11 @@ export function registerHandlers(server: PluginServerContext): void {
       }
     },
   );
+
+  server.handle(createSessionRpc, async ({ name }: { name: string }) => {
+    await createSession(name);
+    return { name };
+  });
 
   server.handle(killSessionRpc, async ({ id, name }) => {
     await killSession(id, name);
