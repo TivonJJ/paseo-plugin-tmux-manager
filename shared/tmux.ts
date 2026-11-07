@@ -75,3 +75,10 @@ export const killSessionRpc = defineRpc({
   input: z.object({ id: z.string(), name: z.string() }),
   output: z.object({ killed: z.boolean() }),
 });
+
+/** Create a new empty, detached tmux session. The client attaches to it afterwards. */
+export const createSessionRpc = defineRpc({
+  name: "tmux.create",
+  input: z.object({ name: z.string() }),
+  output: z.object({ name: z.string() }),
+});
